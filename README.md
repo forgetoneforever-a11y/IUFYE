@@ -1,0 +1,38 @@
+# IUFYE
+
+IUFYE is a dark, mobile-first messenger interface. This first milestone establishes the React + TypeScript frontend, Express server, Socket.IO transport foundation, PostgreSQL connection check, and Render-ready deployment.
+
+## Local development
+
+```bash
+npm install
+npm run dev
+```
+
+The Vite app runs at http://localhost:5173. Start the API and Socket.IO server separately with `npm run server` on port 3000.
+
+## Production
+
+```bash
+npm install
+npm start
+```
+
+Render settings:
+- Build command: `npm install && npm run build`
+- Start command: `node server.js`
+- Optional environment variable: `DATABASE_URL` (Render PostgreSQL internal URL when the web service and database are in the same region)
+
+Health endpoint: `/api/health`
+
+## Current milestone
+
+- Responsive dark glass messenger layout
+- Chat list, search, sample conversations and profile panels
+- Local demo message composition
+- Express health endpoint and Socket.IO connection foundation
+- Optional PostgreSQL connectivity check
+
+## Not implemented yet
+
+Real user authentication, persistent messages, file uploads, calls, and end-to-end encryption are not implemented. The visible conversations are demo data; do not use this prototype for private or sensitive communication.
