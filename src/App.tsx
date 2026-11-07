@@ -74,6 +74,7 @@ export default function App() {
   const [notice,setNotice] = useState("");
   const current = chats.find(c=>c.id===active) ?? chats[0] ?? {id:"",name:"Выберите чат",handle:"",avatar:"I",color:"violet",message:"",time:"",unread:0};
   const filtered = useMemo(()=>chats.filter(c=>(c.name+c.message+c.handle).toLowerCase().includes(query.toLowerCase())),[chats,query]);
+  useEffect(()=>{activeRef.current=active;},[active]);
   async function loadChats() {
     const response = await fetch("/api/chats", {credentials:"same-origin"});
     const data = await response.json();
@@ -104,7 +105,7 @@ export default function App() {
       if(!alive)return;
       const message=mapMessage(raw);
       if(activeRef.current===raw.conversation_id)setMessages(prev=>prev.some(item=>item.id===message.id)?prev:[...prev,message]);
-      setChats(prev=>prev.map(chat=>chat.id===raw.conversation_id?{...chat,message:raw.body,time:"Сейчас",unread:chat.id===active?0:chat.unread+1}:chat));
+      setChats(prev=>prev.map(chat=>chat.id===raw.conversation_id?{...chat,message:raw.body,time:"Сейчас",unread:chat.id===activeRef.current?0:chat.unread+1}:chat));
     });
     return ()=>{alive=false;connection.disconnect();setSocket(null);};
   },[authUser?.id]);
