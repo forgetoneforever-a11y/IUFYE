@@ -125,7 +125,8 @@ async function sendSmsCode(to, code) {
 async function authenticate(req, res, next) {
   if (!pool || authSecret.length < 32) return apiError(res, 503, "Авторизация не настроена.");
   const header = req.get("authorization") || "";
-  const token = header.startsWith("Bearer ") ? header.slice(7) : "";
+  const cookieToken = (req.headers.cookie || "").split(";").map(part => part.trim()).find(part => part.startsWith("iufye_session="))?.slice("iufye_session=".length) || "";
+  const token = header.startsWith("Bearer ") ? header.slice(7) : cookieToken;
   if (token.length < 32 || token.length > 256) return apiError(res, 401, "Нужно войти в аккаунт.");
   try {
     const result = await pool.query(
@@ -243,9 +244,10 @@ app.post("/api/auth/verify-code", async (req, res) => {
     );
     const profileResult = await client.query("SELECT display_name, bio, avatar_url, status_text FROM profiles WHERE user_id = $1", [user.id]);
     await client.query("COMMIT");
+    const secureCookie = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    res.setHeader("Set-Cookie", `iufye_session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=2592000${secureCookie}`);
     return res.json({
       ok: true,
-      token,
       user: {
         id: user.id,
         email: user.email,
@@ -308,6 +310,8 @@ app.get("/api/users/search", authenticate, async (req, res) => {
 app.post("/api/auth/logout", authenticate, async (req, res) => {
   try {
     await pool.query("UPDATE sessions SET revoked_at = NOW() WHERE token_hash = $1", [req.sessionTokenHash]);
+    const secureCookie = process.env.NODE_ENV === "production" ? "; Secure" : "";
+    res.setHeader("Set-Cookie", `iufye_session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secureCookie}`);
     res.json({ ok: true });
   } catch (error) {
     console.error("[IUFYE] Logout failed:", error.message);
