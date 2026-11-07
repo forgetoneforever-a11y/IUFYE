@@ -42,10 +42,10 @@ Before enabling account endpoints, apply `db/schema.sql` once to the Render Post
 Account API:
 - `POST /api/auth/request-code` — request an email or SMS code; JSON: `{ "channel": "email" | "phone", "destination": "..." }`
 - `POST /api/auth/verify-code` — verify code and create a session; JSON: `{ "channel", "destination", "code", "username?" }`. A new user must provide a username.
-- `GET /api/me` — current account; requires `Authorization: Bearer <token>`
+- `GET /api/me` — current account; requires the HttpOnly session cookie
 - `PATCH /api/profile` — update `displayName`, `bio`, and `statusText`; requires an active session
-- `GET /api/users/search?username=...` — search public usernames; requires a bearer token
-- `POST /api/auth/logout` — revoke the current session; requires a bearer token
+- `GET /api/users/search?username=...` — search public usernames; requires an active session
+- `POST /api/auth/logout` — revoke the current session and clear the cookie; requires an active session
 
 Security notes:
 - Codes are six digits, expire after 10 minutes, are single-use, and are limited to five verification attempts.
