@@ -503,9 +503,63 @@ app.post("/api/auth/logout", authenticate, async (req, res) => {
   }
 });
 
-// The current chat UI is still a local demo. Real-time chat rooms are deliberately
-// not exposed until authenticated membership checks and persistent messages ship.
-io.on("connection", socket => socket.emit("iufye:ready", { connected: true }));
+io.use(async (socket, next) => {
+  try {
+    if (!pool || authSecret.length < 32) return next(new Error("Authentication is unavailable"));
+    const token = readCookie(socket.handshake.headers.cookie, "iufye_session");
+    if (token.length < 32 || token.length > 256) return next(new Error("Authentication required"));
+    const result = await pool.query(
+      `SELECT u.id, u.username, p.display_name
+       FROM sessions s JOIN users u ON u.id = s.user_id
+       LEFT JOIN profiles p ON p.user_id = u.id
+       WHERE s.token_hash = $1 AND s.revoked_at IS NULL
+         AND s.expires_at > NOW() AND u.status = 'active' LIMIT 1`,
+      [digest(token)]
+    );
+    if (!result.rowCount) return next(new Error("Session expired"));
+    socket.data.user = result.rows[0];
+    next();
+  } catch (error) {
+    console.error("[IUFYE] Socket authentication failed:", error.message);
+    next(new Error("Authentication failed"));
+  }
+});
+
+io.on("connection", socket => {
+  socket.emit("iufye:ready", { connected: true, userId: socket.data.user.id });
+
+  socket.on("chat:join", async (payload, acknowledge) => {
+    const conversationId = payload?.conversationId;
+    try {
+      if (!(await requireConversationMember(socket.data.user.id, conversationId))) {
+        if (typeof acknowledge === "function") acknowledge({ ok: false, error: "Чат не найден." });
+        return;
+      }
+      socket.join(`chat:${conversationId}`);
+      if (typeof acknowledge === "function") acknowledge({ ok: true });
+    } catch {
+      if (typeof acknowledge === "function") acknowledge({ ok: false, error: "Не удалось открыть чат." });
+    }
+  });
+
+  socket.on("chat:leave", payload => {
+    if (validUuid(payload?.conversationId)) socket.leave(`chat:${payload.conversationId}`);
+  });
+
+  socket.on("chat:typing", async payload => {
+    const conversationId = payload?.conversationId;
+    if (!validUuid(conversationId)) return;
+    try {
+      if (await requireConversationMember(socket.data.user.id, conversationId)) {
+        socket.to(`chat:${conversationId}`).emit("chat:typing", {
+          conversationId,
+          userId: socket.data.user.id,
+          username: socket.data.user.username
+        });
+      }
+    } catch {}
+  });
+});
 
 app.use(express.static(path.join(__dirname, "dist")));
 app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "dist", "index.html")));
