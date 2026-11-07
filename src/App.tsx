@@ -120,7 +120,7 @@ export default function App() {
     setChatLoading(true);setMessages([]);
     fetch("/api/chats/"+active+"/messages",{credentials:"same-origin"})
       .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error||"Не удалось загрузить сообщения.");return data;})
-      .then(data=>setMessages(prev=>{const history=data.messages.map(mapMessage);const historyIds=new Set(history.map(item=>item.id));return [...history,...prev.filter(item=>!historyIds.has(item.id))];}))
+      .then(data=>setMessages((prev:Message[])=>{const history:Message[]=data.messages.map(mapMessage);const historyIds=new Set(history.map((item:Message)=>item.id));return [...history,...prev.filter((item:Message)=>!historyIds.has(item.id))];}))
       .catch(error=>setNotice(error instanceof Error?error.message:"Ошибка загрузки сообщений."))
       .finally(()=>setChatLoading(false));
     return ()=>{if(socket)socket.emit("chat:leave",{conversationId:active});};
