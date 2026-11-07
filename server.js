@@ -175,11 +175,19 @@ async function requireConversationMember(userId, conversationId) {
   return result.rowCount > 0;
 }
 
+const attachmentBucket = process.env.SUPABASE_STORAGE_BUCKET || "iufye-attachments";
+const maxAttachmentBytes = 15 * 1024 * 1024;
+const allowedAttachmentTypes = new Map([["image/jpeg","jpg"],["image/png","png"],["image/webp","webp"],["image/gif","gif"],["application/pdf","pdf"],["text/plain","txt"]]);
+function storageConfig(){const base=(process.env.SUPABASE_URL||"").replace(/\/$/,"");const key=process.env.SUPABASE_SERVICE_ROLE_KEY||"";if(!base||!key)throw new Error("Supabase Storage is not configured");return {base,key};}
+function storageObjectUrl(base,objectPath,signed=false){const encoded=objectPath.split("/").map(encodeURIComponent).join("/");return base+"/storage/v1/object/"+(signed?"sign/":"")+encodeURIComponent(attachmentBucket)+"/"+encoded;}
+async function signedAttachmentUrl(objectPath){const {base,key}=storageConfig();const response=await fetch(storageObjectUrl(base,objectPath,true),{method:"POST",headers:{apikey:key,Authorization:"Bearer "+key,"Content-Type":"application/json"},body:JSON.stringify({expiresIn:3600})});if(!response.ok)throw new Error("Storage signed URL failed: "+response.status);const data=await response.json();return data.signedURL.startsWith("http")?data.signedURL:base+"/storage/v1"+data.signedURL;}
+function validAttachmentBytes(buffer,mime){if(mime==="image/jpeg")return buffer.length>3&&buffer[0]===255&&buffer[1]===216&&buffer[2]===255;if(mime==="image/png")return buffer.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]));if(mime==="image/gif")return buffer.subarray(0,6).toString("ascii").startsWith("GIF8");if(mime==="image/webp")return buffer.length>12&&buffer.toString("ascii",0,4)==="RIFF"&&buffer.toString("ascii",8,12)==="WEBP";if(mime==="application/pdf")return buffer.subarray(0,5).toString("ascii")==="%PDF-";if(mime==="text/plain")return !buffer.includes(0);return false;}
+
 app.get("/api/chats", authenticate, async (req, res) => {
   try {
     const result = await pool.query(
       `SELECT c.id, c.type, c.title, c.updated_at,
-              lm.body AS last_message, lm.created_at AS last_message_at,
+              CASE WHEN lm.message_type IN ('image','file') THEN '📎 ' || lm.attachment_name ELSE lm.body END AS last_message, lm.created_at AS last_message_at,
               CASE WHEN c.type = 'direct' THEN COALESCE(peer.display_name, peer.username) ELSE c.title END AS display_title,
               CASE WHEN c.type = 'direct' THEN peer.username ELSE NULL END AS peer_username,
               (SELECT COUNT(*)::int FROM messages unread
@@ -188,7 +196,7 @@ app.get("/api/chats", authenticate, async (req, res) => {
        FROM conversations c
        JOIN conversation_members mine ON mine.conversation_id = c.id AND mine.user_id = $1
        LEFT JOIN LATERAL (
-         SELECT m.body, m.created_at FROM messages m
+         SELECT m.body, m.created_at, m.message_type, m.attachment_name FROM messages m
          WHERE m.conversation_id = c.id AND m.deleted_at IS NULL
          ORDER BY m.created_at DESC, m.id DESC LIMIT 1
        ) lm ON TRUE
@@ -298,7 +306,7 @@ app.get("/api/chats/:conversationId/messages", authenticate, async (req, res) =>
   try {
     if (!(await requireConversationMember(req.user.id, conversationId))) return apiError(res, 404, "Чат не найден.");
     const result = await pool.query(
-      `SELECT m.id, m.conversation_id, m.sender_id, m.body, m.created_at,
+      `SELECT m.id, m.conversation_id, m.sender_id, m.body, m.message_type, m.attachment_path, m.attachment_name, m.attachment_mime, m.attachment_size, m.created_at,
               u.username AS sender_username, p.display_name AS sender_display_name
        FROM messages m LEFT JOIN users u ON u.id = m.sender_id
        LEFT JOIN profiles p ON p.user_id = m.sender_id
@@ -311,13 +319,37 @@ app.get("/api/chats/:conversationId/messages", authenticate, async (req, res) =>
       "UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
       [conversationId, req.user.id]
     );
-    res.json({ ok: true, messages: result.rows.reverse() });
+    const messages = await Promise.all(result.rows.reverse().map(async row => ({...row, attachment_url: row.attachment_path ? await signedAttachmentUrl(row.attachment_path) : null})));\n    res.json({ ok: true, messages });
   } catch (error) {
     console.error("[IUFYE] Message history failed:", error.message);
     apiError(res, 500, "Не удалось загрузить сообщения.");
   }
 });
 
+app.post("/api/chats/:conversationId/attachments", authenticate, express.raw({type:()=>true,limit:"15mb"}), async (req,res)=>{
+  const conversationId=req.params.conversationId;
+  if(!validUuid(conversationId))return apiError(res,400,"Некорректный чат.");
+  if(!(await requireConversationMember(req.user.id,conversationId)))return apiError(res,404,"Чат не найден.");
+  const mime=(req.get("content-type")||"").split(";")[0].trim().toLowerCase();
+  const extension=allowedAttachmentTypes.get(mime);
+  const buffer=req.body;
+  if(!extension)return apiError(res,415,"Поддерживаются JPG, PNG, WEBP, GIF, PDF и TXT.");
+  if(!Buffer.isBuffer(buffer)||buffer.length<1||buffer.length>maxAttachmentBytes)return apiError(res,413,"Файл должен быть не больше 15 МБ.");
+  if(!validAttachmentBytes(buffer,mime))return apiError(res,415,"Содержимое файла не соответствует его типу.");
+  if(!rateLimit("attachment:"+req.user.id,12,10*60*1000))return apiError(res,429,"Слишком много файлов. Попробуйте позже.");
+  const requested=typeof req.query.filename==="string"?req.query.filename:"file";
+  const filename=requested.replace(/[\\\\/\\x00-\\x1f\\x7f]/g,"_").trim().slice(0,120)||"file";
+  const objectPath=req.user.id+"/"+conversationId+"/"+randomBytes(16).toString("hex")+"."+extension;
+  try{
+    const {base,key}=storageConfig();
+    const upload=await fetch(storageObjectUrl(base,objectPath),{method:"POST",headers:{apikey:key,Authorization:"Bearer "+key,"Content-Type":mime,"x-upsert":"false","cache-control":"3600"},body:buffer});
+    if(!upload.ok){const detail=await upload.text().catch(()=>"");console.error("[IUFYE] Storage upload failed:",upload.status,detail.slice(0,300));return apiError(res,502,"Не удалось сохранить файл в хранилище.");}
+    const inserted=await pool.query(`INSERT INTO messages (conversation_id,sender_id,body,message_type,attachment_path,attachment_name,attachment_mime,attachment_size) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,conversation_id,sender_id,body,message_type,attachment_path,attachment_name,attachment_mime,attachment_size,created_at`,[conversationId,req.user.id,filename,mime.startsWith("image/")?"image":"file",objectPath,filename,mime,buffer.length]);
+    const message={...inserted.rows[0],attachment_url:await signedAttachmentUrl(objectPath),sender_username:req.user.username,sender_display_name:req.user.display_name};
+    io.to("chat:"+conversationId).emit("chat:message",message);
+    res.status(201).json({ok:true,message});
+  }catch(error){console.error("[IUFYE] Attachment upload failed:",error.message);apiError(res,503,"Хранилище файлов не настроено или временно недоступно.");}
+});
 app.post("/api/chats/:conversationId/messages", authenticate, async (req, res) => {
   const { conversationId } = req.params;
   const body = typeof req.body?.body === "string" ? req.body.body.trim() : "";
