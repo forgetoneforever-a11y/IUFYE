@@ -25,7 +25,7 @@ Render settings:
 - Email delivery: `RESEND_API_KEY`, `EMAIL_FROM`
 - SMS delivery: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`
 - Optional Socket.IO cross-origin allowlist: `APP_ORIGINS` (comma-separated exact origins)
-- Private file storage: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`\n- Private file storage: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`
+- Private file storage: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`
 
 Copy `.env.example` as a reference. Never commit real secrets or send database credentials in chat. Use a verified sender domain for Resend and a properly configured Twilio sender for SMS. If a delivery provider is not configured, that channel returns a setup error; no verification code is exposed to the browser or written to logs.
 
