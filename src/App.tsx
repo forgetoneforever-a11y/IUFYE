@@ -110,15 +110,15 @@ export default function App() {
     return ()=>{alive=false;connection.disconnect();setSocket(null);};
   },[authUser?.id]);
   useEffect(()=>{
-    if(!active||!socket)return;
-    socket.emit("chat:join",{conversationId:active});
+    if(!active)return;
+    if(socket)socket.emit("chat:join",{conversationId:active});
     setChatLoading(true);setMessages([]);
     fetch("/api/chats/"+active+"/messages",{credentials:"same-origin"})
       .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error||"Не удалось загрузить сообщения.");return data;})
       .then(data=>setMessages(data.messages.map(mapMessage)))
       .catch(error=>setNotice(error instanceof Error?error.message:"Ошибка загрузки сообщений."))
       .finally(()=>setChatLoading(false));
-    return ()=>{socket.emit("chat:leave",{conversationId:active});};
+    return ()=>{if(socket)socket.emit("chat:leave",{conversationId:active});};
   },[active,socket]);
   async function sendMessage() {
     const value=draft.trim(); if(!value||!active)return;
@@ -195,7 +195,7 @@ export default function App() {
         </div>
       </header>
       <div className="message-area">{active&&<div className="date-pill">История сообщений</div>}{chatLoading&&<div className="empty-search">Загружаем сообщения…</div>}{!active&&!chatLoading&&<div className="empty-search">Выберите чат или начните новый</div>}
-        {messages.map(m=><div key={m.id} className={`message-row ${m.mine?"mine":""}`}><div className="bubble">{m.text}<span className="message-meta">{m.time}{m.mine&&<CheckCheck size={14}/>}</span></div></div>)}
+        {messages.map(m=><div key={m.id} className={`message-row ${m.mine?"mine":""}`}><div className="bubble">{!m.mine&&m.sender&&<small className="message-sender">{m.sender}</small>}{m.text}<span className="message-meta">{m.time}{m.mine&&<CheckCheck size={14}/>}</span></div></div>)}
         {active&&<div className="encryption-note">Сообщения сохраняются в аккаунте и синхронизируются между подключёнными устройствами.</div>}
       </div>
       <div className="composer">
