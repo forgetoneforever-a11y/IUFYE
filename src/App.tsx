@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { Search, Pencil, MoreHorizontal, Paperclip, Smile, Mic, Send, Phone, Video, Info, Image as ImageIcon, FileText, Bell, Settings, Users, Bookmark, Archive, ChevronLeft, CheckCheck, X } from "lucide-react";
 
-type Chat = { id:string; name:string; handle:string; avatar:string; color:string; message:string; time:string; unread:number; online?:boolean };
+type Chat = { id:string; type:"direct"|"group"; name:string; handle:string; avatar:string; color:string; message:string; time:string; unread:number; online?:boolean };
 type Message = { id:string; mine:boolean; text:string; time:string; sender?:string };
 type Account = { id:string; email:string|null; phone:string|null; username:string; display_name?:string; bio?:string; avatar_url?:string|null; status_text?:string };
 
@@ -71,16 +71,21 @@ export default function App() {
   const [mobileChat,setMobileChat] = useState(false);
   const [showProfile,setShowProfile] = useState(false);
   const [showNewChat,setShowNewChat] = useState(false);
+  const [showCreateGroup,setShowCreateGroup] = useState(false);
+  const [groupTitle,setGroupTitle] = useState("");
+  const [groupMembers,setGroupMembers] = useState("");
+  const [groupBusy,setGroupBusy] = useState(false);
+  const [chatFilter,setChatFilter] = useState<"all"|"direct"|"group">("all");
   const [notice,setNotice] = useState("");
   const current = chats.find(c=>c.id===active) ?? chats[0] ?? {id:"",name:"Выберите чат",handle:"",avatar:"I",color:"violet",message:"",time:"",unread:0};
-  const filtered = useMemo(()=>chats.filter(c=>(c.name+c.message+c.handle).toLowerCase().includes(query.toLowerCase())),[chats,query]);
+  const filtered = useMemo(()=>chats.filter(c=>(chatFilter==="all"||c.type===chatFilter)&&(c.name+c.message+c.handle).toLowerCase().includes(query.toLowerCase())),[chats,query,chatFilter]);
   useEffect(()=>{activeRef.current=active;},[active]);
   async function loadChats() {
     const response = await fetch("/api/chats", {credentials:"same-origin"});
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Не удалось загрузить чаты.");
     const mapped:Chat[] = data.chats.map((chat:any)=>({
-      id:chat.id, name:chat.display_title || chat.title || "Группа",
+      id:chat.id, type:chat.type==="group"?"group":"direct", name:chat.display_title || chat.title || "Группа",
       handle:chat.peer_username ? "@"+chat.peer_username : (chat.type==="group"?"группа":"личный чат"),
       avatar:(chat.display_title || chat.title || "I").slice(0,1).toUpperCase(), color:"violet",
       message:chat.last_message || "Нет сообщений",
@@ -115,7 +120,7 @@ export default function App() {
     setChatLoading(true);setMessages([]);
     fetch("/api/chats/"+active+"/messages",{credentials:"same-origin"})
       .then(async response=>{const data=await response.json();if(!response.ok)throw new Error(data.error||"Не удалось загрузить сообщения.");return data;})
-      .then(data=>setMessages(data.messages.map(mapMessage)))
+      .then(data=>setMessages(prev=>{const merged=new Map(prev.map(item=>[item.id,item]));for(const raw of data.messages){const item=mapMessage(raw);if(!merged.has(item.id))merged.set(item.id,item);}return [...merged.values()].sort((a,b)=>a.id.localeCompare(b.id));}))
       .catch(error=>setNotice(error instanceof Error?error.message:"Ошибка загрузки сообщений."))
       .finally(()=>setChatLoading(false));
     return ()=>{if(socket)socket.emit("chat:leave",{conversationId:active});};
@@ -141,6 +146,18 @@ export default function App() {
   async function openDirectChat(username:string) {
     try {const response=await fetch("/api/chats/direct",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({username})});const data=await response.json();if(!response.ok)throw new Error(data.error||"Не удалось создать чат.");await loadChats();setActive(data.conversationId);setShowNewChat(false);setSearchUser("");setSearchResults([]);setMobileChat(true);}
     catch(error){setNotice(error instanceof Error?error.message:"Ошибка создания чата.");}
+  }
+  async function createGroup() {
+    const title=groupTitle.trim();
+    const usernames=[...new Set(groupMembers.split(/[\\s,;]+/).map(value=>value.trim().replace(/^@/, "")).filter(Boolean))];
+    if(title.length<2||!usernames.length){setNotice("Укажите название группы и хотя бы одного участника.");return;}
+    setGroupBusy(true);
+    try {
+      const response=await fetch("/api/chats/group",{method:"POST",credentials:"same-origin",headers:{"Content-Type":"application/json"},body:JSON.stringify({title,usernames})});
+      const data=await response.json();if(!response.ok)throw new Error(data.error||"Не удалось создать группу.");
+      await loadChats();setActive(data.conversationId);setShowCreateGroup(false);setShowNewChat(false);setGroupTitle("");setGroupMembers("");setMobileChat(true);
+    } catch(error){setNotice(error instanceof Error?error.message:"Ошибка создания группы.");}
+    finally{setGroupBusy(false);}
   }
   if (authLoading) return <main className="auth-screen"><div className="auth-card"><span className="brand-mark">i</span><h1>IUFYE</h1><p>Подключаем аккаунт…</p></div></main>;
   if (!authUser) return <main className="auth-screen"><section className="auth-card">
@@ -171,7 +188,7 @@ export default function App() {
         <button className="icon-button" aria-label="Новый чат" onClick={()=>setShowNewChat(true)}><Pencil size={18}/></button>
       </div>
       <div className="search-wrap"><Search size={17}/><input value={query} onChange={e=>setQuery(e.target.value)} placeholder="Поиск"/><kbd>⌘ K</kbd></div>
-      <div className="filter-row"><button className="filter active">Все чаты</button><button className="filter">Личные</button><button className="filter">Группы</button></div>
+      <div className="filter-row"><button className={`filter ${chatFilter==="all"?"active":""}`} onClick={()=>setChatFilter("all")}>Все чаты</button><button className={`filter ${chatFilter==="direct"?"active":""}`} onClick={()=>setChatFilter("direct")}>Личные</button><button className={`filter ${chatFilter==="group"?"active":""}`} onClick={()=>setChatFilter("group")}>Группы</button></div>
       <div className="chat-list">{filtered.map(chat=><button key={chat.id} className={`chat-item ${active===chat.id?"selected":""}`} onClick={()=>selectChat(chat)}>
         <span className={`avatar ${chat.color}`}>{chat.avatar}{chat.online&&<i className="online-dot"/>}</span>
         <span className="chat-copy"><span className="chat-line"><strong>{chat.name}</strong><time>{chat.time}</time></span><span className="chat-line preview"><span>{chat.message}</span>{chat.unread>0&&<b className="unread">{chat.unread}</b>}</span></span>
@@ -210,7 +227,13 @@ export default function App() {
       <div className="profile-actions"><button onClick={()=>setNotice("Уведомления скоро появятся")}><Bell/>Уведомления</button><button onClick={()=>setNotice("Медиафайлы скоро появятся")}><ImageIcon/>Медиафайлы</button><button onClick={()=>setNotice("Файлы скоро появятся")}><FileText/>Файлы</button><button onClick={()=>setNotice("Архив скоро появится")}><Archive/>Архив</button></div><button className="logout-button" onClick={logout}>Выйти из аккаунта</button>
     </section></div>}
     {showNewChat&&<div className="overlay" onClick={()=>setShowNewChat(false)}><section className="new-chat-panel" onClick={e=>e.stopPropagation()}>
-      <button className="close-button" onClick={()=>setShowNewChat(false)}><X/></button><h2>Новое сообщение</h2><p>Найди человека по его уникальному username.</p><div className="search-wrap"><Search size={17}/><input value={searchUser} onChange={e=>setSearchUser(e.target.value)} onKeyDown={e=>e.key==="Enter"&&searchPeople()} placeholder="@username"/><button className="search-action" onClick={searchPeople} disabled={searchBusy}>{searchBusy?"…":"Найти"}</button></div><div className="user-search-results">{searchResults.map(person=><button key={person.id} onClick={()=>openDirectChat(person.username)}><span className="avatar small violet">{(person.display_name||person.username).slice(0,1).toUpperCase()}</span><span><b>{person.display_name||person.username}</b><small>@{person.username}</small></span></button>)}</div>
+      <button className="close-button" onClick={()=>setShowNewChat(false)}><X/></button><h2>Новое сообщение</h2><p>Найди человека по его уникальному username.</p><button className="create-group-link" onClick={()=>{setShowNewChat(false);setShowCreateGroup(true);}}>＋ Создать группу</button><div className="search-wrap"><Search size={17}/><input value={searchUser} onChange={e=>setSearchUser(e.target.value)} onKeyDown={e=>e.key==="Enter"&&searchPeople()} placeholder="@username"/><button className="search-action" onClick={searchPeople} disabled={searchBusy}>{searchBusy?"…":"Найти"}</button></div><div className="user-search-results">{searchResults.map(person=><button key={person.id} onClick={()=>openDirectChat(person.username)}><span className="avatar small violet">{(person.display_name||person.username).slice(0,1).toUpperCase()}</span><span><b>{person.display_name||person.username}</b><small>@{person.username}</small></span></button>)}</div>
+    </section></div>}
+    {showCreateGroup&&<div className="overlay" onClick={()=>setShowCreateGroup(false)}><section className="new-chat-panel" onClick={e=>e.stopPropagation()}>
+      <button className="close-button" onClick={()=>setShowCreateGroup(false)}><X/></button><h2>Новая группа</h2><p>Создай общий чат и добавь участников по их username.</p>
+      <label className="group-label">Название группы</label><input className="group-input" value={groupTitle} onChange={e=>setGroupTitle(e.target.value)} maxLength={80} placeholder="Например, Команда"/>
+      <label className="group-label">Участники</label><textarea className="group-input group-members" value={groupMembers} onChange={e=>setGroupMembers(e.target.value)} placeholder="@username1, @username2"/><small className="group-hint">Укажи от 1 до 49 username через запятую или пробел. Ты автоматически станешь владельцем группы.</small>
+      <button className="auth-primary" disabled={groupBusy||groupTitle.trim().length<2||!groupMembers.trim()} onClick={createGroup}>{groupBusy?"Создаём…":"Создать группу"}</button>
     </section></div>}
     {notice&&<div className="toast" onClick={()=>setNotice("")}>{notice}<button><X size={15}/></button></div>}
   </main>;
