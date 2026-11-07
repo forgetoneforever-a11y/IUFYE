@@ -1,6 +1,6 @@
 # IUFYE
 
-IUFYE is a dark, mobile-first messenger interface. This first milestone establishes the React + TypeScript frontend, Express server, Socket.IO transport foundation, PostgreSQL connection check, and Render-ready deployment.
+IUFYE is a dark, mobile-first messenger interface. The project currently contains a React + TypeScript frontend, Express server, Socket.IO transport foundation, and PostgreSQL-backed account API foundation.
 
 ## Local development
 
@@ -21,29 +21,46 @@ npm start
 Render settings:
 - Build command: `npm install && npm run build`
 - Start command: `node server.js`
-- Optional environment variable: `DATABASE_URL` (Render PostgreSQL internal URL when the web service and database are in the same region)
+- Required for account API: `DATABASE_URL`, `AUTH_SECRET`
+- Email delivery: `RESEND_API_KEY`, `EMAIL_FROM`
+- SMS delivery: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`
+- Optional Socket.IO cross-origin allowlist: `APP_ORIGINS` (comma-separated exact origins)
+
+Copy `.env.example` as a reference. Never commit real secrets or send database credentials in chat. Use a verified sender domain for Resend and a properly configured Twilio sender for SMS. If a delivery provider is not configured, that channel returns a setup error; no verification code is exposed to the browser or written to logs.
 
 Health endpoint: `/api/health`
 
-## Stage 1 — account and profile foundation
+## Stage 1 — accounts and profiles
 
-A PostgreSQL schema draft is available at `db/schema.sql`. It defines:
-- `users`: verified email/phone identity fields and unique case-insensitive usernames
+Before enabling account endpoints, apply `db/schema.sql` once to the Render PostgreSQL database. The schema creates:
+- `users`: email/phone identity, verified status, and unique case-insensitive usernames
 - `profiles`: display name, avatar URL, bio, and status text
-- `auth_challenges`: expiring one-time verification challenges with attempt counters
+- `auth_challenges`: expiring one-time codes with attempt counters
 - `sessions`: hashed session-token storage with expiry and revocation
-- `contacts`: user contact relationships
+- `contacts`: contact relationships
 
-Apply the schema to a PostgreSQL database before enabling account API routes. The schema alone does not activate registration, send verification codes, or create a production-ready authentication flow. Email/SMS delivery providers and their environment variables still need to be configured.
+Account API:
+- `POST /api/auth/request-code` — request an email or SMS code; JSON: `{ "channel": "email" | "phone", "destination": "..." }`
+- `POST /api/auth/verify-code` — verify code and create a session; JSON: `{ "channel", "destination", "code", "username?" }`. A new user must provide a username.
+- `GET /api/me` — current account; requires `Authorization: Bearer <token>`
+- `PATCH /api/profile` — update `displayName`, `bio`, and `statusText`; requires a bearer token
+- `GET /api/users/search?username=...` — search public usernames; requires a bearer token
+- `POST /api/auth/logout` — revoke the current session; requires a bearer token
+
+Security notes:
+- Codes are six digits, expire after 10 minutes, are single-use, and are limited to five verification attempts.
+- Request limits are applied per IP and destination in each server process.
+- Only hashes of session tokens and keyed hashes of verification codes are stored.
+- Authentication is unavailable until PostgreSQL, `AUTH_SECRET`, and the selected delivery provider are configured.
+- Use HTTPS in production. Configure `APP_ORIGINS` for any separate frontend origin.
 
 ## Current milestone
 
 - Responsive dark glass messenger layout
-- Chat list, search, sample conversations and profile panels
-- Local demo message composition
-- Express health endpoint and Socket.IO connection foundation
-- Optional PostgreSQL connectivity check
+- Demo chat list, local search, sample conversations and profile panels
+- PostgreSQL account schema and OTP/session/profile/search API foundation
+- Express health endpoint
 
 ## Not implemented yet
 
-Real user authentication, persistent messages, file uploads, calls, and end-to-end encryption are not implemented. The visible conversations are demo data; do not use this prototype for private or sensitive communication.
+The current React chat UI is still demo-only and is not connected to the new account API. Messages are not persisted or synchronized. Real-time chat membership checks, file uploads, calls, and end-to-end encryption are not implemented. Do not use this prototype for private or sensitive communication.
