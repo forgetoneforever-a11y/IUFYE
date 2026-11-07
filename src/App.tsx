@@ -3,7 +3,7 @@ import { io, Socket } from "socket.io-client";
 import { Search, Pencil, MoreHorizontal, Paperclip, Smile, Mic, Send, Phone, Video, Info, Image as ImageIcon, FileText, Bell, Settings, Users, Bookmark, Archive, ChevronLeft, CheckCheck, X } from "lucide-react";
 
 type Chat = { id:string; type:"direct"|"group"; name:string; handle:string; avatar:string; color:string; message:string; time:string; unread:number; online?:boolean };
-type Message = { id:string; mine:boolean; text:string; time:string; sender?:string };
+type Message = { id:string; mine:boolean; text:string; time:string; sender?:string; attachmentUrl?:string|null; attachmentName?:string|null; attachmentMime?:string|null; attachmentSize?:number|null };
 type Account = { id:string; email:string|null; phone:string|null; username:string; display_name?:string; bio?:string; avatar_url?:string|null; status_text?:string };
 
 const initialChats:Chat[] = [];
@@ -62,6 +62,8 @@ export default function App() {
   const activeRef = useRef(active);
   const [query,setQuery] = useState("");
   const [draft,setDraft] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadBusy,setUploadBusy] = useState(false);
   const [messages,setMessages] = useState<Message[]>(starterMessages);
   const [socket,setSocket] = useState<Socket|null>(null);
   const [chatLoading,setChatLoading] = useState(false);
@@ -97,7 +99,7 @@ export default function App() {
     return mapped;
   }
   function mapMessage(raw:any):Message {
-    return {id:raw.id,mine:raw.sender_id===authUser?.id,text:raw.body,time:new Date(raw.created_at).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"}),sender:raw.sender_display_name||raw.sender_username||""};
+    return {id:raw.id,mine:raw.sender_id===authUser?.id,text:raw.body,time:new Date(raw.created_at).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"}),sender:raw.sender_display_name||raw.sender_username||"",attachmentUrl:raw.attachment_url||null,attachmentName:raw.attachment_name||null,attachmentMime:raw.attachment_mime||null,attachmentSize:raw.attachment_size?Number(raw.attachment_size):null};
   }
   useEffect(()=>{
     if (!authUser) return;
@@ -110,7 +112,7 @@ export default function App() {
       if(!alive)return;
       const message=mapMessage(raw);
       if(activeRef.current===raw.conversation_id)setMessages(prev=>prev.some(item=>item.id===message.id)?prev:[...prev,message]);
-      setChats(prev=>prev.map(chat=>chat.id===raw.conversation_id?{...chat,message:raw.body,time:"Сейчас",unread:chat.id===activeRef.current?0:chat.unread+1}:chat));
+      setChats(prev=>prev.map(chat=>chat.id===raw.conversation_id?{...chat,message:raw.attachment_name?"📎 "+raw.attachment_name:raw.body,time:"Сейчас",unread:chat.id===activeRef.current?0:chat.unread+1}:chat));
     });
     return ()=>{alive=false;connection.disconnect();setSocket(null);};
   },[authUser?.id]);
@@ -125,6 +127,22 @@ export default function App() {
       .finally(()=>setChatLoading(false));
     return ()=>{if(socket)socket.emit("chat:leave",{conversationId:active});};
   },[active,socket]);
+  async function uploadAttachment(file:File) {
+    const allowed=["image/jpeg","image/png","image/webp","image/gif","application/pdf","text/plain"];
+    if(!active)return;
+    if(!allowed.includes(file.type)){setNotice("Можно отправить JPG, PNG, WEBP, GIF, PDF или TXT.");return;}
+    if(file.size<1||file.size>15*1024*1024){setNotice("Максимальный размер файла — 15 МБ.");return;}
+    setUploadBusy(true);
+    try {
+      const params=new URLSearchParams({filename:file.name});
+      const response=await fetch("/api/chats/"+active+"/attachments?"+params.toString(),{method:"POST",credentials:"same-origin",headers:{"Content-Type":file.type},body:file});
+      const data=await response.json();if(!response.ok)throw new Error(data.error||"Не удалось загрузить файл.");
+      const message=mapMessage(data.message);
+      setMessages(prev=>prev.some(item=>item.id===message.id)?prev:[...prev,message]);
+      setChats(prev=>prev.map(chat=>chat.id===active?{...chat,message:"📎 "+file.name,time:"Сейчас"}:chat));
+    } catch(error){setNotice(error instanceof Error?error.message:"Ошибка загрузки файла.");}
+    finally{setUploadBusy(false);if(fileInputRef.current)fileInputRef.current.value="";}
+  }
   async function sendMessage() {
     const value=draft.trim(); if(!value||!active)return;
     setDraft("");
@@ -212,12 +230,13 @@ export default function App() {
         </div>
       </header>
       <div className="message-area">{active&&<div className="date-pill">История сообщений</div>}{chatLoading&&<div className="empty-search">Загружаем сообщения…</div>}{!active&&!chatLoading&&<div className="empty-search">Выберите чат или начните новый</div>}
-        {messages.map(m=><div key={m.id} className={`message-row ${m.mine?"mine":""}`}><div className="bubble">{!m.mine&&m.sender&&<small className="message-sender">{m.sender}</small>}{m.text}<span className="message-meta">{m.time}{m.mine&&<CheckCheck size={14}/>}</span></div></div>)}
+        {messages.map(m=><div key={m.id} className={`message-row ${m.mine?"mine":""}`}><div className="bubble">{!m.mine&&m.sender&&<small className="message-sender">{m.sender}</small>}{m.attachmentUrl&&m.attachmentMime?.startsWith("image/")?<a className="attachment-image" href={m.attachmentUrl} target="_blank" rel="noreferrer"><img src={m.attachmentUrl} alt={m.attachmentName||"Изображение"}/></a>:m.attachmentUrl?<a className="attachment-file" href={m.attachmentUrl} target="_blank" rel="noreferrer"><FileText size={22}/><span><b>{m.attachmentName}</b><small>{m.attachmentSize?Math.max(1,Math.round(m.attachmentSize/1024))+" КБ":"Файл"}</small></span></a>:m.text}<span className="message-meta">{m.time}{m.mine&&<CheckCheck size={14}/>}</span></div></div>)}
         {active&&<div className="encryption-note">Сообщения сохраняются в аккаунте и синхронизируются между подключёнными устройствами.</div>}
       </div>
       <div className="composer">
-        <button className="icon-button" aria-label="Прикрепить файл" onClick={()=>setNotice("Загрузка файлов будет подключена следующим этапом")}><Paperclip size={21}/></button>
-        <input value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendMessage()} placeholder={active?"Сообщение...":"Сначала выберите чат"} disabled={!active}/>
+        <input ref={fileInputRef} className="file-input" type="file" accept="image/jpeg,image/png,image/webp,image/gif,application/pdf,text/plain" onChange={e=>{const file=e.target.files?.[0];if(file)uploadAttachment(file);}}/>
+        <button className="icon-button" aria-label="Прикрепить файл" disabled={!active||uploadBusy} onClick={()=>fileInputRef.current?.click()}><Paperclip size={21}/></button>
+        <input value={draft} onChange={e=>setDraft(e.target.value)} onKeyDown={e=>e.key==="Enter"&&sendMessage()} placeholder={uploadBusy?"Загружаем файл…":active?"Сообщение...":"Сначала выберите чат"} disabled={!active}/>
         <button className="icon-button" aria-label="Эмодзи" onClick={()=>setDraft(v=>v+"🙂")}><Smile size={21}/></button>
         {draft.trim()&&active?<button className="send-button" onClick={sendMessage} aria-label="Отправить"><Send size={18}/></button>:<button className="icon-button" aria-label="Голосовое сообщение" onClick={()=>setNotice("Голосовые сообщения появятся позже")}><Mic size={21}/></button>}
       </div>
