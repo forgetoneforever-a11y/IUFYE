@@ -1,8 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Search, Pencil, MoreHorizontal, Paperclip, Smile, Mic, Send, Phone, Video, Info, Image as ImageIcon, FileText, Bell, Settings, Users, Bookmark, Archive, ChevronLeft, CheckCheck, X } from "lucide-react";
 
 type Chat = { id:number; name:string; handle:string; avatar:string; color:string; message:string; time:string; unread:number; online?:boolean };
 type Message = { id:number; mine:boolean; text:string; time:string };
+type Account = { id:string; email:string|null; phone:string|null; username:string; display_name?:string; bio?:string; avatar_url?:string|null; status_text?:string };
 
 const initialChats:Chat[] = [
   {id:1,name:"Александр",handle:"@alex",avatar:"А",color:"violet",message:"Да, отлично. Тогда до завтра!",time:"14:32",unread:2,online:true},
@@ -20,6 +21,53 @@ const starterMessages:Message[] = [
 ];
 
 export default function App() {
+  const [authUser,setAuthUser] = useState<Account|null>(null);
+  const [authLoading,setAuthLoading] = useState(true);
+  const [authChannel,setAuthChannel] = useState<"email"|"phone">("email");
+  const [authDestination,setAuthDestination] = useState("");
+  const [authUsername,setAuthUsername] = useState("");
+  const [authCode,setAuthCode] = useState("");
+  const [authStep,setAuthStep] = useState<"identity"|"code">("identity");
+  const [authBusy,setAuthBusy] = useState(false);
+  const [authError,setAuthError] = useState("");
+  useEffect(() => {
+    fetch("/api/me", { credentials:"same-origin" })
+      .then(async response => response.ok ? (await response.json()).user as Account : null)
+      .then(user => setAuthUser(user))
+      .catch(() => setAuthUser(null))
+      .finally(() => setAuthLoading(false));
+  }, []);
+  async function requestAuthCode() {
+    setAuthBusy(true); setAuthError("");
+    try {
+      const response = await fetch("/api/auth/request-code", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({channel:authChannel,destination:authDestination})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Не удалось отправить код.");
+      setAuthStep("code");
+    } catch (error) { setAuthError(error instanceof Error ? error.message : "Ошибка запроса."); }
+    finally { setAuthBusy(false); }
+  }
+  async function verifyAuthCode() {
+    setAuthBusy(true); setAuthError("");
+    try {
+      const response = await fetch("/api/auth/verify-code", {
+        method:"POST", headers:{"Content-Type":"application/json"},
+        credentials:"same-origin",
+        body:JSON.stringify({channel:authChannel,destination:authDestination,code:authCode,username:authUsername})
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Неверный код.");
+      setAuthUser(data.user as Account);
+    } catch (error) { setAuthError(error instanceof Error ? error.message : "Ошибка проверки кода."); }
+    finally { setAuthBusy(false); }
+  }
+  async function logout() {
+    await fetch("/api/auth/logout", {method:"POST",credentials:"same-origin"}).catch(()=>{});
+    setAuthUser(null); setAuthStep("identity"); setAuthCode(""); setAuthUsername("");
+  }
   const [chats,setChats] = useState(initialChats);
   const [active,setActive] = useState(1);
   const [query,setQuery] = useState("");
@@ -31,7 +79,26 @@ export default function App() {
   const [notice,setNotice] = useState("");
   const current = chats.find(c=>c.id===active) ?? chats[0];
   const filtered = useMemo(()=>chats.filter(c=>(c.name+c.message+c.handle).toLowerCase().includes(query.toLowerCase())),[chats,query]);
-
+  if (authLoading) return <main className="auth-screen"><div className="auth-card"><span className="brand-mark">i</span><h1>IUFYE</h1><p>Подключаем аккаунт…</p></div></main>;
+  if (!authUser) return <main className="auth-screen"><section className="auth-card">
+    <div className="auth-brand"><span className="brand-mark">i</span><span>IUFYE</span></div>
+    <h1>{authStep==="identity"?"Добро пожаловать":"Проверьте код"}</h1>
+    <p>{authStep==="identity"?"Войдите или создайте аккаунт. Мы отправим одноразовый код.":"Введите шестизначный код из сообщения."}</p>
+    {authStep==="identity" ? <>
+      <div className="auth-switch"><button className={authChannel==="email"?"active":""} onClick={()=>setAuthChannel("email")}>Почта</button><button className={authChannel==="phone"?"active":""} onClick={()=>setAuthChannel("phone")}>Телефон</button></div>
+      <label>{authChannel==="email"?"Адрес электронной почты":"Телефон в международном формате"}</label>
+      <input className="auth-input" value={authDestination} onChange={e=>setAuthDestination(e.target.value)} placeholder={authChannel==="email"?"name@example.com":"+31612345678"} autoComplete={authChannel==="email"?"email":"tel"}/>
+      <label>Username</label><input className="auth-input" value={authUsername} onChange={e=>setAuthUsername(e.target.value)} placeholder="например, iufye_user" autoComplete="username"/>
+      <small className="auth-hint">4–32 символа: латинские буквы, цифры и _</small>
+      <button className="auth-primary" disabled={authBusy||!authDestination.trim()||!authUsername.trim()} onClick={requestAuthCode}>{authBusy?"Отправляем…":"Получить код"}</button>
+    </> : <>
+      <label>Код подтверждения</label><input className="auth-input code-input" value={authCode} onChange={e=>setAuthCode(e.target.value.replace(/\D/g,"").slice(0,6))} placeholder="000000" inputMode="numeric" autoComplete="one-time-code"/>
+      <button className="auth-primary" disabled={authBusy||authCode.length!==6} onClick={verifyAuthCode}>{authBusy?"Проверяем…":"Подтвердить и войти"}</button>
+      <button className="auth-back" onClick={()=>{setAuthStep("identity");setAuthCode("");setAuthError("");}}>Изменить адрес или номер</button>
+    </>}
+    {authError&&<div className="auth-error">{authError}</div>}
+    <div className="auth-foot">Продолжая, вы подтверждаете, что имеете право использовать этот адрес или номер.</div>
+  </section></main>;
   function sendMessage() {
     const value=draft.trim(); if(!value)return;
     const time=new Date().toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"});
@@ -62,7 +129,7 @@ export default function App() {
         <button onClick={()=>setNotice("Раздел контактов скоро появится")}><Users size={18}/><span>Контакты</span></button>
         <button onClick={()=>setNotice("Настройки скоро появятся")}><Settings size={18}/><span>Настройки</span></button>
         <button onClick={()=>setNotice("Избранное находится в списке чатов")}><Bookmark size={18}/><span>Избранное</span></button>
-        <div className="user-mini" onClick={()=>setShowProfile(true)}><span className="avatar small violet">D</span><span><b>Мой профиль</b><small>В сети</small></span><MoreHorizontal size={18}/></div>
+        <div className="user-mini" onClick={()=>setShowProfile(true)}><span className="avatar small violet">D</span><span><b>{authUser.display_name || authUser.username}</b><small>@{authUser.username}</small></span><MoreHorizontal size={18}/></div>
       </div>
     </aside>
     <section className={`conversation ${mobileChat?"mobile-visible":""}`}>
@@ -89,7 +156,7 @@ export default function App() {
     </section>
     {showProfile&&<div className="overlay" onClick={()=>setShowProfile(false)}><section className="profile-panel" onClick={e=>e.stopPropagation()}>
       <button className="close-button" onClick={()=>setShowProfile(false)}><X/></button><span className={`avatar profile-avatar ${current.color}`}>{current.avatar}</span><h2>{current.name}</h2><p>{current.handle}</p>
-      <div className="profile-actions"><button onClick={()=>setNotice("Уведомления скоро появятся")}><Bell/>Уведомления</button><button onClick={()=>setNotice("Медиафайлы скоро появятся")}><ImageIcon/>Медиафайлы</button><button onClick={()=>setNotice("Файлы скоро появятся")}><FileText/>Файлы</button><button onClick={()=>setNotice("Архив скоро появится")}><Archive/>Архив</button></div>
+      <div className="profile-actions"><button onClick={()=>setNotice("Уведомления скоро появятся")}><Bell/>Уведомления</button><button onClick={()=>setNotice("Медиафайлы скоро появятся")}><ImageIcon/>Медиафайлы</button><button onClick={()=>setNotice("Файлы скоро появятся")}><FileText/>Файлы</button><button onClick={()=>setNotice("Архив скоро появится")}><Archive/>Архив</button></div><button className="logout-button" onClick={logout}>Выйти из аккаунта</button>
     </section></div>}
     {showNewChat&&<div className="overlay" onClick={()=>setShowNewChat(false)}><section className="new-chat-panel" onClick={e=>e.stopPropagation()}>
       <button className="close-button" onClick={()=>setShowNewChat(false)}><X/></button><h2>Новое сообщение</h2><p>Поиск контактов появится после подключения аккаунтов.</p><div className="search-wrap"><Search size={17}/><input placeholder="Имя пользователя или номер"/></div>
