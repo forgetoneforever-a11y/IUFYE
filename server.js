@@ -14,7 +14,8 @@ const app = express();
 const server = http.createServer(app);
 const allowedOrigins = (process.env.APP_ORIGINS || "").split(",").map(v => v.trim()).filter(Boolean);
 const corsOrigin = (origin, callback) => {
-  if (!origin) return callback(null, true);\n  if (allowedOrigins.includes(origin)) return callback(null, true);
+  if (!origin) return callback(null, true);
+  if (allowedOrigins.includes(origin)) return callback(null, true);
   return callback(new Error("Origin is not allowed"));
 };
 const io = new Server(server, { cors: { origin: corsOrigin, credentials: true } });
