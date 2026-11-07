@@ -25,6 +25,17 @@ Render settings:
 
 Health endpoint: `/api/health`
 
+## Stage 1 — account and profile foundation
+
+A PostgreSQL schema draft is available at `db/schema.sql`. It defines:
+- `users`: verified email/phone identity fields and unique case-insensitive usernames
+- `profiles`: display name, avatar URL, bio, and status text
+- `auth_challenges`: expiring one-time verification challenges with attempt counters
+- `sessions`: hashed session-token storage with expiry and revocation
+- `contacts`: user contact relationships
+
+Apply the schema to a PostgreSQL database before enabling account API routes. The schema alone does not activate registration, send verification codes, or create a production-ready authentication flow. Email/SMS delivery providers and their environment variables still need to be configured.
+
 ## Current milestone
 
 - Responsive dark glass messenger layout
