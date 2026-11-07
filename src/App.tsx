@@ -149,7 +149,7 @@ export default function App() {
   }
   async function createGroup() {
     const title=groupTitle.trim();
-    const usernames=[...new Set(groupMembers.split(/[\\s,;]+/).map(value=>value.trim().replace(/^@/, "")).filter(Boolean))];
+    const usernames=[...new Set(groupMembers.split(/[\s,;]+/).map(value=>value.trim().replace(/^@/, "")).filter(Boolean))];
     if(title.length<2||!usernames.length){setNotice("Укажите название группы и хотя бы одного участника.");return;}
     setGroupBusy(true);
     try {
