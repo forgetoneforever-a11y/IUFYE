@@ -1,7 +1,6 @@
 -- IUFYE Stage 1: account and profile foundation
 -- Apply once to the Render PostgreSQL database before enabling account endpoints.
-
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- PostgreSQL 13+ provides gen_random_uuid() without an extension.
 
 CREATE TABLE IF NOT EXISTS users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
