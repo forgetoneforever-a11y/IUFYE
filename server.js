@@ -319,7 +319,8 @@ app.get("/api/chats/:conversationId/messages", authenticate, async (req, res) =>
       "UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
       [conversationId, req.user.id]
     );
-    const messages = await Promise.all(result.rows.reverse().map(async row => ({...row, attachment_url: row.attachment_path ? await signedAttachmentUrl(row.attachment_path) : null})));\n    res.json({ ok: true, messages });
+    const messages = await Promise.all(result.rows.reverse().map(async row => ({...row, attachment_url: row.attachment_path ? await signedAttachmentUrl(row.attachment_path) : null})));
+    res.json({ ok: true, messages });
   } catch (error) {
     console.error("[IUFYE] Message history failed:", error.message);
     apiError(res, 500, "Не удалось загрузить сообщения.");
@@ -338,7 +339,7 @@ app.post("/api/chats/:conversationId/attachments", authenticate, express.raw({ty
   if(!validAttachmentBytes(buffer,mime))return apiError(res,415,"Содержимое файла не соответствует его типу.");
   if(!rateLimit("attachment:"+req.user.id,12,10*60*1000))return apiError(res,429,"Слишком много файлов. Попробуйте позже.");
   const requested=typeof req.query.filename==="string"?req.query.filename:"file";
-  const filename=requested.replace(/[\\\\/\\x00-\\x1f\\x7f]/g,"_").trim().slice(0,120)||"file";
+  const filename=requested.replaceAll("/","_").replaceAll("\\","_").replace(/[\x00-\x1f\x7f]/g,"_").trim().slice(0,120)||"file";
   const objectPath=req.user.id+"/"+conversationId+"/"+randomBytes(16).toString("hex")+"."+extension;
   try{
     const {base,key}=storageConfig();
