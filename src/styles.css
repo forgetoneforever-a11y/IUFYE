@@ -24,3 +24,15 @@
 .auth-error{margin-top:16px;padding:11px 12px;border:1px solid #d86d7844;border-radius:10px;background:#b43b4b18;color:#f09ba4;font-size:11px;line-height:1.5}
 .auth-foot{margin-top:24px;padding-top:17px;border-top:1px solid var(--line);color:#6f7788;font-size:10px;line-height:1.6;text-align:center}
 .logout-button{width:100%;margin-top:18px;padding:12px;border:1px solid #a94b5844;border-radius:11px;background:#a83f4a16;color:#ed9aa3;font-size:12px}
+
+
+/* Persistent chat and people search */
+.message-sender{display:block;margin-bottom:5px;color:#b9adff;font-size:10px;font-weight:700}
+.search-action{border:0;border-radius:8px;background:#7163d2;color:#fff;padding:7px 10px;font-size:10px}
+.search-action:disabled{opacity:.55}
+.user-search-results{display:flex;flex-direction:column;gap:5px;margin-top:12px;max-height:300px;overflow:auto}
+.user-search-results>button{display:flex;align-items:center;gap:11px;width:100%;padding:10px;border:1px solid transparent;border-radius:12px;background:transparent;text-align:left}
+.user-search-results>button:hover{background:#ffffff09;border-color:var(--line)}
+.user-search-results>button>span:last-child{display:flex;flex-direction:column;gap:4px}
+.user-search-results b{font-size:12px}
+.user-search-results small{font-size:10px;color:#858b9b}
