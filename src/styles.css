@@ -46,3 +46,15 @@
 .group-input:focus{border-color:#8979f4;box-shadow:0 0 0 3px #8979f422}
 .group-members{min-height:90px;line-height:1.5}
 .group-hint{display:block;margin-top:8px;color:#737b8d;font-size:10px;line-height:1.5}
+
+
+/* Private image and document attachments */
+.file-input{display:none!important}
+.composer .icon-button:disabled{opacity:.4;cursor:not-allowed}
+.attachment-image{display:block;max-width:min(360px,65vw);overflow:hidden;border-radius:11px}
+.attachment-image img{display:block;max-width:100%;max-height:320px;object-fit:contain;border-radius:11px}
+.attachment-file{display:flex;align-items:center;gap:11px;min-width:180px;max-width:320px;padding:10px 12px;border:1px solid #ffffff1c;border-radius:12px;background:#090c1680;color:#f1efff;text-decoration:none}
+.attachment-file>svg{flex:none;color:#c4bbff}
+.attachment-file>span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.attachment-file b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px}
+.attachment-file small{color:#a8a4bf;font-size:10px}
