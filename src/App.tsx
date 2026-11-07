@@ -68,6 +68,17 @@ export default function App() {
     await fetch("/api/auth/logout", {method:"POST",credentials:"same-origin"}).catch(()=>{});
     setAuthUser(null); setAuthStep("identity"); setAuthCode(""); setAuthUsername("");
   }
+  const [chats,setChats] = useState(initialChats);
+  const [active,setActive] = useState(1);
+  const [query,setQuery] = useState("");
+  const [draft,setDraft] = useState("");
+  const [messages,setMessages] = useState<Message[]>(starterMessages);
+  const [mobileChat,setMobileChat] = useState(false);
+  const [showProfile,setShowProfile] = useState(false);
+  const [showNewChat,setShowNewChat] = useState(false);
+  const [notice,setNotice] = useState("");
+  const current = chats.find(c=>c.id===active) ?? chats[0];
+  const filtered = useMemo(()=>chats.filter(c=>(c.name+c.message+c.handle).toLowerCase().includes(query.toLowerCase())),[chats,query]);
   if (authLoading) return <main className="auth-screen"><div className="auth-card"><span className="brand-mark">i</span><h1>IUFYE</h1><p>Подключаем аккаунт…</p></div></main>;
   if (!authUser) return <main className="auth-screen"><section className="auth-card">
     <div className="auth-brand"><span className="brand-mark">i</span><span>IUFYE</span></div>
@@ -88,18 +99,6 @@ export default function App() {
     {authError&&<div className="auth-error">{authError}</div>}
     <div className="auth-foot">Продолжая, вы подтверждаете, что имеете право использовать этот адрес или номер.</div>
   </section></main>;
-  const [chats,setChats] = useState(initialChats);
-  const [active,setActive] = useState(1);
-  const [query,setQuery] = useState("");
-  const [draft,setDraft] = useState("");
-  const [messages,setMessages] = useState<Message[]>(starterMessages);
-  const [mobileChat,setMobileChat] = useState(false);
-  const [showProfile,setShowProfile] = useState(false);
-  const [showNewChat,setShowNewChat] = useState(false);
-  const [notice,setNotice] = useState("");
-  const current = chats.find(c=>c.id===active) ?? chats[0];
-  const filtered = useMemo(()=>chats.filter(c=>(c.name+c.message+c.handle).toLowerCase().includes(query.toLowerCase())),[chats,query]);
-
   function sendMessage() {
     const value=draft.trim(); if(!value)return;
     const time=new Date().toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"});
