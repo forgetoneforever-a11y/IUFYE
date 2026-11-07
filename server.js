@@ -15,10 +15,19 @@ const server = http.createServer(app);
 const allowedOrigins = (process.env.APP_ORIGINS || "").split(",").map(v => v.trim()).filter(Boolean);
 const corsOrigin = (origin, callback) => {
   if (!origin) return callback(null, true);
-  if (allowedOrigins.includes(origin)) return callback(null, true);
+  if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return callback(null, true);
   return callback(new Error("Origin is not allowed"));
 };
-const io = new Server(server, { cors: { origin: corsOrigin, credentials: true } });
+const io = new Server(server, {
+  cors: { origin: corsOrigin, credentials: true },
+  allowRequest: (req, callback) => {
+    const origin = req.headers.origin;
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.length) return callback(null, allowedOrigins.includes(origin));
+    try { return callback(null, new URL(origin).host === req.headers.host); }
+    catch { return callback(null, false); }
+  }
+});
 const PORT = Number(process.env.PORT || 3000);
 const pool = process.env.DATABASE_URL
   ? new pg.Pool({
@@ -148,6 +157,189 @@ async function authenticate(req, res, next) {
     apiError(res, 500, "Не удалось проверить сессию.");
   }
 }
+
+
+function validUuid(value) {
+  return typeof value === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+function readCookie(header, name) {
+  const prefix = `${name}=`;
+  return (header || "").split(";").map(part => part.trim()).find(part => part.startsWith(prefix))?.slice(prefix.length) || "";
+}
+async function requireConversationMember(userId, conversationId) {
+  if (!validUuid(conversationId)) return false;
+  const result = await pool.query(
+    "SELECT 1 FROM conversation_members WHERE user_id = $1 AND conversation_id = $2",
+    [userId, conversationId]
+  );
+  return result.rowCount > 0;
+}
+
+app.get("/api/chats", authenticate, async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT c.id, c.type, c.title, c.updated_at,
+              lm.body AS last_message, lm.created_at AS last_message_at,
+              CASE WHEN c.type = 'direct' THEN COALESCE(peer.display_name, peer.username) ELSE c.title END AS display_title,
+              CASE WHEN c.type = 'direct' THEN peer.username ELSE NULL END AS peer_username,
+              (SELECT COUNT(*)::int FROM messages unread
+               WHERE unread.conversation_id = c.id AND unread.sender_id <> $1
+                 AND unread.created_at > mine.last_read_at AND unread.deleted_at IS NULL) AS unread_count
+       FROM conversations c
+       JOIN conversation_members mine ON mine.conversation_id = c.id AND mine.user_id = $1
+       LEFT JOIN LATERAL (
+         SELECT m.body, m.created_at FROM messages m
+         WHERE m.conversation_id = c.id AND m.deleted_at IS NULL
+         ORDER BY m.created_at DESC, m.id DESC LIMIT 1
+       ) lm ON TRUE
+       LEFT JOIN LATERAL (
+         SELECT u.username, p.display_name FROM conversation_members other
+         JOIN users u ON u.id = other.user_id
+         LEFT JOIN profiles p ON p.user_id = u.id
+         WHERE other.conversation_id = c.id AND other.user_id <> $1
+         ORDER BY other.joined_at LIMIT 1
+       ) peer ON c.type = 'direct'
+       ORDER BY COALESCE(lm.created_at, c.updated_at) DESC LIMIT 100`,
+      [req.user.id]
+    );
+    res.json({ ok: true, chats: result.rows });
+  } catch (error) {
+    console.error("[IUFYE] Chat list failed:", error.message);
+    apiError(res, 500, "Не удалось загрузить список чатов.");
+  }
+});
+
+app.post("/api/chats/direct", authenticate, async (req, res) => {
+  const username = normalizeUsername(req.body?.username);
+  if (!username) return apiError(res, 400, "Укажите корректный username.");
+  try {
+    const targetResult = await pool.query(
+      "SELECT id FROM users WHERE lower(username) = lower($1) AND status = 'active' LIMIT 1",
+      [username]
+    );
+    if (!targetResult.rowCount) return apiError(res, 404, "Пользователь не найден.");
+    const targetId = targetResult.rows[0].id;
+    if (targetId === req.user.id) return apiError(res, 400, "Нельзя создать личный чат с самим собой.");
+    const directKey = [req.user.id, targetId].sort().join(":");
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const conversation = await client.query(
+        `INSERT INTO conversations (type, direct_key, created_by)
+         VALUES ('direct', $1, $2)
+         ON CONFLICT (direct_key) WHERE direct_key IS NOT NULL
+         DO UPDATE SET updated_at = conversations.updated_at
+         RETURNING id`,
+        [directKey, req.user.id]
+      );
+      const conversationId = conversation.rows[0].id;
+      await client.query(
+        `INSERT INTO conversation_members (conversation_id, user_id)
+         VALUES ($1, $2), ($1, $3) ON CONFLICT DO NOTHING`,
+        [conversationId, req.user.id, targetId]
+      );
+      await client.query("COMMIT");
+      res.json({ ok: true, conversationId });
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally { client.release(); }
+  } catch (error) {
+    console.error("[IUFYE] Direct chat creation failed:", error.message);
+    apiError(res, 500, "Не удалось создать чат.");
+  }
+});
+
+app.post("/api/chats/group", authenticate, async (req, res) => {
+  const title = typeof req.body?.title === "string" ? req.body.title.trim() : "";
+  const names = Array.isArray(req.body?.usernames) ? req.body.usernames : [];
+  if (title.length < 2 || title.length > 80 || names.length < 1 || names.length > 49) {
+    return apiError(res, 400, "Укажите название группы и от 1 до 49 участников.");
+  }
+  const usernames = [...new Set(names.map(normalizeUsername).filter(Boolean))];
+  if (usernames.length !== names.length) return apiError(res, 400, "Проверьте usernames участников.");
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const users = await client.query(
+      "SELECT id FROM users WHERE lower(username) = ANY($1::text[]) AND status = 'active'",
+      [usernames.map(v => v.toLowerCase())]
+    );
+    if (users.rowCount !== usernames.length) {
+      await client.query("ROLLBACK");
+      return apiError(res, 404, "Один или несколько участников не найдены.");
+    }
+    const conversation = await client.query(
+      "INSERT INTO conversations (type, title, created_by) VALUES ('group', $1, $2) RETURNING id",
+      [title, req.user.id]
+    );
+    const conversationId = conversation.rows[0].id;
+    const members = [...new Set([req.user.id, ...users.rows.map(row => row.id)])];
+    for (const userId of members) {
+      await client.query(
+        "INSERT INTO conversation_members (conversation_id, user_id, role) VALUES ($1, $2, $3)",
+        [conversationId, userId, userId === req.user.id ? "owner" : "member"]
+      );
+    }
+    await client.query("COMMIT");
+    res.status(201).json({ ok: true, conversationId });
+  } catch (error) {
+    await client.query("ROLLBACK").catch(() => {});
+    console.error("[IUFYE] Group chat creation failed:", error.message);
+    apiError(res, 500, "Не удалось создать группу.");
+  } finally { client.release(); }
+});
+
+app.get("/api/chats/:conversationId/messages", authenticate, async (req, res) => {
+  const { conversationId } = req.params;
+  if (!validUuid(conversationId)) return apiError(res, 400, "Некорректный чат.");
+  const before = typeof req.query.before === "string" ? req.query.before : null;
+  if (before && Number.isNaN(Date.parse(before))) return apiError(res, 400, "Некорректная дата.");
+  try {
+    if (!(await requireConversationMember(req.user.id, conversationId))) return apiError(res, 404, "Чат не найден.");
+    const result = await pool.query(
+      `SELECT m.id, m.conversation_id, m.sender_id, m.body, m.created_at,
+              u.username AS sender_username, p.display_name AS sender_display_name
+       FROM messages m LEFT JOIN users u ON u.id = m.sender_id
+       LEFT JOIN profiles p ON p.user_id = m.sender_id
+       WHERE m.conversation_id = $1 AND m.deleted_at IS NULL
+         AND ($2::timestamptz IS NULL OR m.created_at < $2::timestamptz)
+       ORDER BY m.created_at DESC, m.id DESC LIMIT 50`,
+      [conversationId, before]
+    );
+    await pool.query(
+      "UPDATE conversation_members SET last_read_at = NOW() WHERE conversation_id = $1 AND user_id = $2",
+      [conversationId, req.user.id]
+    );
+    res.json({ ok: true, messages: result.rows.reverse() });
+  } catch (error) {
+    console.error("[IUFYE] Message history failed:", error.message);
+    apiError(res, 500, "Не удалось загрузить сообщения.");
+  }
+});
+
+app.post("/api/chats/:conversationId/messages", authenticate, async (req, res) => {
+  const { conversationId } = req.params;
+  const body = typeof req.body?.body === "string" ? req.body.body.trim() : "";
+  if (!validUuid(conversationId)) return apiError(res, 400, "Некорректный чат.");
+  if (!body || body.length > 4000) return apiError(res, 400, "Сообщение должно содержать от 1 до 4000 символов.");
+  if (!rateLimit(`message:${req.user.id}`, 30, 10 * 1000)) return apiError(res, 429, "Слишком часто. Подождите немного.");
+  try {
+    if (!(await requireConversationMember(req.user.id, conversationId))) return apiError(res, 404, "Чат не найден.");
+    const result = await pool.query(
+      `INSERT INTO messages (conversation_id, sender_id, body)
+       VALUES ($1, $2, $3)
+       RETURNING id, conversation_id, sender_id, body, created_at`,
+      [conversationId, req.user.id, body]
+    );
+    const message = { ...result.rows[0], sender_username: req.user.username, sender_display_name: req.user.display_name };
+    io.to(`chat:${conversationId}`).emit("chat:message", message);
+    res.status(201).json({ ok: true, message });
+  } catch (error) {
+    console.error("[IUFYE] Message send failed:", error.message);
+    apiError(res, 500, "Не удалось отправить сообщение.");
+  }
+});
 
 app.get("/api/health", async (_req, res) => {
   let database = "not_configured";
@@ -320,9 +512,63 @@ app.post("/api/auth/logout", authenticate, async (req, res) => {
   }
 });
 
-// The current chat UI is still a local demo. Real-time chat rooms are deliberately
-// not exposed until authenticated membership checks and persistent messages ship.
-io.on("connection", socket => socket.emit("iufye:ready", { connected: true }));
+io.use(async (socket, next) => {
+  try {
+    if (!pool || authSecret.length < 32) return next(new Error("Authentication is unavailable"));
+    const token = readCookie(socket.handshake.headers.cookie, "iufye_session");
+    if (token.length < 32 || token.length > 256) return next(new Error("Authentication required"));
+    const result = await pool.query(
+      `SELECT u.id, u.username, p.display_name
+       FROM sessions s JOIN users u ON u.id = s.user_id
+       LEFT JOIN profiles p ON p.user_id = u.id
+       WHERE s.token_hash = $1 AND s.revoked_at IS NULL
+         AND s.expires_at > NOW() AND u.status = 'active' LIMIT 1`,
+      [digest(token)]
+    );
+    if (!result.rowCount) return next(new Error("Session expired"));
+    socket.data.user = result.rows[0];
+    next();
+  } catch (error) {
+    console.error("[IUFYE] Socket authentication failed:", error.message);
+    next(new Error("Authentication failed"));
+  }
+});
+
+io.on("connection", socket => {
+  socket.emit("iufye:ready", { connected: true, userId: socket.data.user.id });
+
+  socket.on("chat:join", async (payload, acknowledge) => {
+    const conversationId = payload?.conversationId;
+    try {
+      if (!(await requireConversationMember(socket.data.user.id, conversationId))) {
+        if (typeof acknowledge === "function") acknowledge({ ok: false, error: "Чат не найден." });
+        return;
+      }
+      socket.join(`chat:${conversationId}`);
+      if (typeof acknowledge === "function") acknowledge({ ok: true });
+    } catch {
+      if (typeof acknowledge === "function") acknowledge({ ok: false, error: "Не удалось открыть чат." });
+    }
+  });
+
+  socket.on("chat:leave", payload => {
+    if (validUuid(payload?.conversationId)) socket.leave(`chat:${payload.conversationId}`);
+  });
+
+  socket.on("chat:typing", async payload => {
+    const conversationId = payload?.conversationId;
+    if (!validUuid(conversationId)) return;
+    try {
+      if (await requireConversationMember(socket.data.user.id, conversationId)) {
+        socket.to(`chat:${conversationId}`).emit("chat:typing", {
+          conversationId,
+          userId: socket.data.user.id,
+          username: socket.data.user.username
+        });
+      }
+    } catch {}
+  });
+});
 
 app.use(express.static(path.join(__dirname, "dist")));
 app.get("*", (_req, res) => res.sendFile(path.join(__dirname, "dist", "index.html")));

@@ -54,6 +54,32 @@ Security notes:
 - Authentication is unavailable until PostgreSQL, `AUTH_SECRET`, and the selected delivery provider are configured.
 - Use HTTPS in production. Configure `APP_ORIGINS` for any separate frontend origin.
 
+## Stage 2 — persistent chats and live messages
+
+After applying `db/schema.sql`, apply `db/chat-schema.sql` to the same PostgreSQL database.
+
+Added API:
+- `GET /api/chats` — list conversations for the signed-in user
+- `POST /api/chats/direct` — create or open a direct conversation; JSON: `{ "username": "someone" }`
+- `POST /api/chats/group` — create a group; JSON: `{ "title": "Project", "usernames": ["person_one", "person_two"] }`
+- `GET /api/chats/:conversationId/messages` — latest 50 messages (optional ISO `before` query)
+- `POST /api/chats/:conversationId/messages` — persist and broadcast a text message; JSON: `{ "body": "Hello" }`
+
+Socket.IO:
+- The handshake is authenticated using the HttpOnly session cookie.
+- `chat:join` checks that the signed-in user belongs to the conversation before joining its room.
+- `chat:leave` leaves a room; `chat:typing` is broadcast only to authorized conversation members.
+- New messages are inserted through the authenticated REST endpoint and then broadcast to authorized room members.
+
+The Black Glass UI now loads real conversation history, creates direct chats from username search, sends persisted text messages, and receives live updates. File uploads, group creation controls, message editing/deletion, delivery/read receipts, calls, and end-to-end encryption are still future work.
+
+## Deployment order for the staged PRs
+
+1. Merge Stage 1 account foundation first.
+2. Merge Stage 2 persistent chat second.
+3. Apply `db/schema.sql`, then `db/chat-schema.sql` to PostgreSQL.
+4. Configure the environment variables described above and deploy the app.
+
 ## Current milestone
 
 - Responsive dark glass messenger layout
