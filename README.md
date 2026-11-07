@@ -43,14 +43,14 @@ Account API:
 - `POST /api/auth/request-code` — request an email or SMS code; JSON: `{ "channel": "email" | "phone", "destination": "..." }`
 - `POST /api/auth/verify-code` — verify code and create a session; JSON: `{ "channel", "destination", "code", "username?" }`. A new user must provide a username.
 - `GET /api/me` — current account; requires `Authorization: Bearer <token>`
-- `PATCH /api/profile` — update `displayName`, `bio`, and `statusText`; requires a bearer token
+- `PATCH /api/profile` — update `displayName`, `bio`, and `statusText`; requires an active session
 - `GET /api/users/search?username=...` — search public usernames; requires a bearer token
 - `POST /api/auth/logout` — revoke the current session; requires a bearer token
 
 Security notes:
 - Codes are six digits, expire after 10 minutes, are single-use, and are limited to five verification attempts.
 - Request limits are applied per IP and destination in each server process.
-- Only hashes of session tokens and keyed hashes of verification codes are stored.
+- Only hashes of session tokens and keyed hashes of verification codes are stored. The browser session is held in an HttpOnly, SameSite=Lax cookie (Secure in production).
 - Authentication is unavailable until PostgreSQL, `AUTH_SECRET`, and the selected delivery provider are configured.
 - Use HTTPS in production. Configure `APP_ORIGINS` for any separate frontend origin.
 
