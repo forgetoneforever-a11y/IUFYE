@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { io, Socket } from "socket.io-client";
 import { Search, Pencil, MoreHorizontal, Paperclip, Smile, Mic, Send, Phone, Video, Info, Image as ImageIcon, FileText, Bell, Settings, Users, Bookmark, Archive, ChevronLeft, CheckCheck, X } from "lucide-react";
 
@@ -59,6 +59,7 @@ export default function App() {
   }
   const [chats,setChats] = useState<Chat[]>(initialChats);
   const [active,setActive] = useState("");
+  const activeRef = useRef(active);
   const [query,setQuery] = useState("");
   const [draft,setDraft] = useState("");
   const [messages,setMessages] = useState<Message[]>(starterMessages);
@@ -102,7 +103,7 @@ export default function App() {
     connection.on("chat:message",(raw:any)=>{
       if(!alive)return;
       const message=mapMessage(raw);
-      setMessages(prev=>prev.some(item=>item.id===message.id)?prev:[...prev,message]);
+      if(activeRef.current===raw.conversation_id)setMessages(prev=>prev.some(item=>item.id===message.id)?prev:[...prev,message]);
       setChats(prev=>prev.map(chat=>chat.id===raw.conversation_id?{...chat,message:raw.body,time:"Сейчас",unread:chat.id===active?0:chat.unread+1}:chat));
     });
     return ()=>{alive=false;connection.disconnect();setSocket(null);};
