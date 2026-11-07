@@ -330,7 +330,6 @@ app.get("/api/chats/:conversationId/messages", authenticate, async (req, res) =>
 app.post("/api/chats/:conversationId/attachments", authenticate, express.raw({type:()=>true,limit:"15mb"}), async (req,res)=>{
   const conversationId=req.params.conversationId;
   if(!validUuid(conversationId))return apiError(res,400,"Некорректный чат.");
-  if(!(await requireConversationMember(req.user.id,conversationId)))return apiError(res,404,"Чат не найден.");
   const mime=(req.get("content-type")||"").split(";")[0].trim().toLowerCase();
   const extension=allowedAttachmentTypes.get(mime);
   const buffer=req.body;
@@ -341,15 +340,19 @@ app.post("/api/chats/:conversationId/attachments", authenticate, express.raw({ty
   const requested=typeof req.query.filename==="string"?req.query.filename:"file";
   const filename=requested.replaceAll("/","_").replaceAll("\\","_").replace(/[\x00-\x1f\x7f]/g,"_").trim().slice(0,120)||"file";
   const objectPath=req.user.id+"/"+conversationId+"/"+randomBytes(16).toString("hex")+"."+extension;
+  let uploaded=false;
   try{
+    if(!(await requireConversationMember(req.user.id,conversationId)))return apiError(res,404,"Чат не найден.");
     const {base,key}=storageConfig();
     const upload=await fetch(storageObjectUrl(base,objectPath),{method:"POST",headers:{apikey:key,Authorization:"Bearer "+key,"Content-Type":mime,"x-upsert":"false","cache-control":"3600"},body:buffer});
     if(!upload.ok){const detail=await upload.text().catch(()=>"");console.error("[IUFYE] Storage upload failed:",upload.status,detail.slice(0,300));return apiError(res,502,"Не удалось сохранить файл в хранилище.");}
+    uploaded=true;
+    const signedUrl=await signedAttachmentUrl(objectPath);
     const inserted=await pool.query(`INSERT INTO messages (conversation_id,sender_id,body,message_type,attachment_path,attachment_name,attachment_mime,attachment_size) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,conversation_id,sender_id,body,message_type,attachment_path,attachment_name,attachment_mime,attachment_size,created_at`,[conversationId,req.user.id,filename,mime.startsWith("image/")?"image":"file",objectPath,filename,mime,buffer.length]);
-    const message={...inserted.rows[0],attachment_url:await signedAttachmentUrl(objectPath),sender_username:req.user.username,sender_display_name:req.user.display_name};
+    const message={...inserted.rows[0],attachment_url:signedUrl,sender_username:req.user.username,sender_display_name:req.user.display_name};
     io.to("chat:"+conversationId).emit("chat:message",message);
     res.status(201).json({ok:true,message});
-  }catch(error){console.error("[IUFYE] Attachment upload failed:",error.message);apiError(res,503,"Хранилище файлов не настроено или временно недоступно.");}
+  }catch(error){if(uploaded){try{const {base,key}=storageConfig();await fetch(storageObjectUrl(base,objectPath),{method:"DELETE",headers:{apikey:key,Authorization:"Bearer "+key}});}catch{}}console.error("[IUFYE] Attachment upload failed:",error.message);apiError(res,503,"Хранилище файлов не настроено или временно недоступно.");}
 });
 app.post("/api/chats/:conversationId/messages", authenticate, async (req, res) => {
   const { conversationId } = req.params;
