@@ -71,7 +71,7 @@ Socket.IO:
 - `chat:leave` leaves a room; `chat:typing` is broadcast only to authorized conversation members.
 - New messages are inserted through the authenticated REST endpoint and then broadcast to authorized room members.
 
-The Black Glass UI now loads real conversation history, creates direct chats from username search, sends persisted text messages, and receives live updates. File uploads, group creation controls, message editing/deletion, delivery/read receipts, calls, and end-to-end encryption are still future work.
+The Black Glass UI loads real conversation history, creates direct chats from username search, sends persisted text messages, receives live updates, and includes group creation from usernames plus All / Personal / Groups filters. File uploads, message editing/deletion, delivery/read receipts, calls, and end-to-end encryption remain future work.
 
 ## Deployment order for the staged PRs
 
@@ -89,4 +89,4 @@ The Black Glass UI now loads real conversation history, creates direct chats fro
 
 ## Not implemented yet
 
-The current React chat UI is still demo-only and is not connected to the new account API. Messages are not persisted or synchronized. Real-time chat membership checks, file uploads, calls, and end-to-end encryption are not implemented. Do not use this prototype for private or sensitive communication.
+The code is not production-ready until both database migrations are applied, OTP delivery is configured, and the app is deployed and tested with multiple accounts. File uploads, calls, message editing/deletion, delivery/read receipts, and end-to-end encryption are not implemented. Do not use this prototype for private or sensitive communication.

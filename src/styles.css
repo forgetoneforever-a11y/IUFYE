@@ -36,3 +36,13 @@
 .user-search-results>button>span:last-child{display:flex;flex-direction:column;gap:4px}
 .user-search-results b{font-size:12px}
 .user-search-results small{font-size:10px;color:#858b9b}
+
+
+/* Group creation */
+.create-group-link{width:100%;margin:0 0 14px;padding:11px 13px;border:1px solid rgba(139,124,255,.24);border-radius:11px;background:rgba(123,106,230,.1);color:#c9c2ff;text-align:left;font-size:12px;transition:.2s}
+.create-group-link:hover{background:rgba(123,106,230,.18);border-color:rgba(139,124,255,.42)}
+.group-label{display:block;margin:15px 0 7px;color:#bfc4d1;font-size:11px;font-weight:600}
+.group-input{display:block;width:100%;min-height:44px;padding:12px 13px;border:1px solid rgba(255,255,255,.1);border-radius:11px;outline:0;background:#0b0e15;color:#f3f3f8;font:13px 'DM Sans',sans-serif;resize:vertical}
+.group-input:focus{border-color:#8979f4;box-shadow:0 0 0 3px #8979f422}
+.group-members{min-height:90px;line-height:1.5}
+.group-hint{display:block;margin-top:8px;color:#737b8d;font-size:10px;line-height:1.5}
