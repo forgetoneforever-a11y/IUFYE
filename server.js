@@ -15,10 +15,19 @@ const server = http.createServer(app);
 const allowedOrigins = (process.env.APP_ORIGINS || "").split(",").map(v => v.trim()).filter(Boolean);
 const corsOrigin = (origin, callback) => {
   if (!origin) return callback(null, true);
-  if (allowedOrigins.includes(origin)) return callback(null, true);
+  if (allowedOrigins.length === 0 || allowedOrigins.includes(origin)) return callback(null, true);
   return callback(new Error("Origin is not allowed"));
 };
-const io = new Server(server, { cors: { origin: corsOrigin, credentials: true } });
+const io = new Server(server, {
+  cors: { origin: corsOrigin, credentials: true },
+  allowRequest: (req, callback) => {
+    const origin = req.headers.origin;
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.length) return callback(null, allowedOrigins.includes(origin));
+    try { return callback(null, new URL(origin).host === req.headers.host); }
+    catch { return callback(null, false); }
+  }
+});
 const PORT = Number(process.env.PORT || 3000);
 const pool = process.env.DATABASE_URL
   ? new pg.Pool({
