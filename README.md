@@ -24,7 +24,7 @@ Render settings:
 - Required for account API: `DATABASE_URL`, `AUTH_SECRET`
 - Email delivery: `RESEND_API_KEY`, `EMAIL_FROM`
 - SMS delivery: `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM`
-- Optional Socket.IO cross-origin allowlist: `APP_ORIGINS` (comma-separated exact origins)
+- Optional Socket.IO cross-origin allowlist: `APP_ORIGINS` (comma-separated exact origins)\n- Private file storage: `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_STORAGE_BUCKET`
 
 Copy `.env.example` as a reference. Never commit real secrets or send database credentials in chat. Use a verified sender domain for Resend and a properly configured Twilio sender for SMS. If a delivery provider is not configured, that channel returns a setup error; no verification code is exposed to the browser or written to logs.
 
@@ -71,9 +71,9 @@ Socket.IO:
 - `chat:leave` leaves a room; `chat:typing` is broadcast only to authorized conversation members.
 - New messages are inserted through the authenticated REST endpoint and then broadcast to authorized room members.
 
-The Black Glass UI loads real conversation history, creates direct chats from username search, sends persisted text messages, receives live updates, and includes group creation from usernames plus All / Personal / Groups filters. File uploads, message editing/deletion, delivery/read receipts, calls, and end-to-end encryption remain future work.
+The Black Glass UI loads real conversation history, creates direct chats from username search, sends persisted text messages, receives live updates, includes group creation and filters, and supports image/document attachments. Attachments use a private Supabase Storage bucket and short-lived signed download URLs. Message editing/deletion, delivery/read receipts, calls, and end-to-end encryption remain future work.
 
-## Deployment order for the staged PRs
+## Stage 4 — images and file attachments\n\nCreate a **private** bucket in Supabase Storage (default name `iufye-attachments`), then configure `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`, and `SUPABASE_STORAGE_BUCKET` in the server environment. Never expose the service-role key to the browser or commit it. Apply `db/attachments-schema.sql` after the account and chat migrations.\n\nThe authenticated `POST /api/chats/:conversationId/attachments` endpoint accepts JPG, PNG, WEBP, GIF, PDF, and TXT files up to 15 MB. It verifies chat membership, checks file signatures for supported binary formats, uploads to private storage, records attachment metadata in PostgreSQL, and returns a signed URL valid for one hour. History requests create fresh signed URLs.\n\n## Deployment order for the staged PRs
 
 1. Merge Stage 1 account foundation first.
 2. Merge Stage 2 persistent chat second.
@@ -89,4 +89,4 @@ The Black Glass UI loads real conversation history, creates direct chats from us
 
 ## Not implemented yet
 
-The code is not production-ready until both database migrations are applied, OTP delivery is configured, and the app is deployed and tested with multiple accounts. File uploads, calls, message editing/deletion, delivery/read receipts, and end-to-end encryption are not implemented. Do not use this prototype for private or sensitive communication.
+The code is not production-ready until both database migrations are applied, OTP delivery is configured, and the app is deployed and tested with multiple accounts. Calls, message editing/deletion, delivery/read receipts, and end-to-end encryption are not implemented. Attachment upload requires the Stage 4 SQL migration and a configured private Supabase Storage bucket. Do not use this prototype for private or sensitive communication.
